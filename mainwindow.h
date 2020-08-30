@@ -23,6 +23,8 @@ public:
     QTimer *timer;
     modbus_t *modbusClient;
     QLabel *labelStBar;
+    uint16_t tab_reg[65535] = {0};
+    struct timeval timeOut;
     ~MainWindow();
 
 public slots:

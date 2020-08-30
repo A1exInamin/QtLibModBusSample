@@ -6,6 +6,7 @@
 #include <QMessageBox>
 #include <QTimer>
 #include <QTime>
+#include <QDebug>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -69,6 +70,7 @@ void MainWindow::onBtnConnect()
         }
         // 连接成功 更改按钮及连接状态变量
         isConnected = true;
+        isFetching = false;
         ui->btnFetch->setEnabled(true);
         ui->btnConnect->setText("Disconnect");
         ui->statusbar->removeWidget(labelStBar);
@@ -82,22 +84,21 @@ void MainWindow::onBtnConnect()
         // 断开连接
         // 停止正在获取的数据
         stopFetching();
-        modbus_close(modbusClient);
+        isFetching = false;
+        isConnected = false;
+        modbus_free(modbusClient);
         ui->btnFetch->setEnabled(false);
         ui->btnConnect->setText("Connect");
         ui->statusbar->removeWidget(labelStBar);
         labelStBar = new QLabel(QString("连接已断开"));
         ui->statusbar->addWidget(labelStBar);
-        isConnected = false;
     }
 }
 
 void MainWindow::onBtnFetch()
 {
     // 设置超时时间
-    struct timeval timeOut;
     timeOut.tv_sec = 1;
-    timeOut.tv_usec = 0;
     modbus_set_response_timeout(modbusClient, &timeOut);
     int interval = ui->editInterval->text().toInt();
     int start = ui->editStart->text().toInt();
@@ -105,20 +106,25 @@ void MainWindow::onBtnFetch()
 
     timer->setInterval(interval);
 
+    // bug: 偶数次连接时 timer 已启动，但是内部动作并未执行
     connect(timer, &QTimer::timeout, [=](){
         fetchData(start, length);
     });
 
     if(isConnected && !isFetching)
     {
-        fetchData(start, length);
+        // 暂时取消点击后立即获取数据的功能，原因：多次连接后会导致同时触发多次 fetchData 操作
+//        fetchData(start, length);
+        qDebug() << timer->isActive() << endl;
         startTimer(timer);
+        qDebug() << timer->isActive() << endl;
         ui->btnFetch->setText("Stop");
         isFetching = true;
     }
-    else
+    else if(isConnected && isFetching)
     {
         stopFetching();
+        isFetching = false;
     }
 }
 
@@ -131,6 +137,8 @@ MainWindow::~MainWindow()
 void MainWindow::on_btnClear_clicked()
 {
     ui->textRecv->setText("");
+    // 清空寄存器
+    memset(tab_reg, 0, sizeof(tab_reg));
 }
 
 // 启动计时器
@@ -141,14 +149,16 @@ void MainWindow::startTimer(QTimer *timer)
 
 // 停止计时器
 void MainWindow::stopTimer(QTimer *timer){
-    timer->stop();
+    if(timer->isActive())
+    {
+        timer->stop();
+    }
 }
 
 // 获取数据
 void MainWindow::fetchData(int start, int length)
 {
-    // 读保持寄存器
-    uint16_t tab_reg[65535] = {0};
+    // 读取保持寄存器
     int rdNum = modbus_read_registers(modbusClient, start, length, tab_reg);
     // 在尝试解决读取长度超出 rdNum 范围时遇到问题，暂时搁置
     if(rdNum > 0 && rdNum >= start)
@@ -172,5 +182,5 @@ void MainWindow::stopFetching()
 {
     stopTimer(timer);
     ui->btnFetch->setText("Fetch");
-    isFetching = false;
+    timer->disconnect();
 }
